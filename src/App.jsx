@@ -1,20 +1,20 @@
 import { AnimatePresence, motion } from "framer-motion";
 import {
-  Bell,
   Bus,
-  Car,
-  CalendarClock,
   Check,
   ChevronLeft,
   CircleDot,
   LayoutDashboard,
   LogOut,
+  PanelLeftClose,
+  PanelLeftOpen,
   Moon,
   Route,
   Search,
   ShieldCheck,
   Sun,
   Ticket,
+  Timer,
   Users,
   WalletCards
 } from "lucide-react";
@@ -27,6 +27,7 @@ const DEMO_ACCOUNTS = [
   ["Female student", "female@amity.edu"],
   ["Admin", "admin@amity.edu"]
 ];
+
 
 function formatTime(value) {
   return new Intl.DateTimeFormat("en-IN", { hour: "2-digit", minute: "2-digit", hour12: true }).format(new Date(value));
@@ -46,10 +47,46 @@ function countdownTo(value) {
 }
 
 function bookingState(schedule) {
-  const now = Date.now();
-  if (now < new Date(schedule.bookingOpenAt).getTime()) return "locked";
-  if (now >= new Date(schedule.departureAt).getTime()) return "departed";
-  return "open";
+  if (Date.now() >= new Date(schedule.departureAt).getTime()) return "departed";
+  return "bookable";
+}
+
+function isDepartingSoon(schedule) {
+  const diff = new Date(schedule.departureAt).getTime() - Date.now();
+  return diff > 0 && diff <= 90 * 60_000;
+}
+
+function seatTier(seat) {
+  return seat.row <= 3 ? "premium" : "general";
+}
+
+function seatPrice(seat) {
+  return seatTier(seat) === "premium" ? 649 : 449;
+}
+
+function formatSeatPrice(seat) {
+  return `Rs ${seatPrice(seat)}`;
+}
+function pickVisibleSchedules(schedules) {
+  const active = schedules.filter((schedule) => bookingState(schedule) !== "departed");
+  const soon = active.filter(isDepartingSoon).slice(0, 2);
+  const soonIds = new Set(soon.map((schedule) => schedule.id));
+  const anytime = active.filter((schedule) => !soonIds.has(schedule.id) && !isDepartingSoon(schedule)).slice(0, 3);
+  const fallback = active.filter((schedule) => !soonIds.has(schedule.id) && !anytime.some((item) => item.id === schedule.id)).slice(0, Math.max(0, 5 - soon.length - anytime.length));
+  return [...soon, ...anytime, ...fallback].slice(0, 5);
+}
+function getRecommendedSeat(seats) {
+  const available = seats.filter((seat) => seat.status === "available");
+  if (!available.length) return null;
+  return [...available].sort((a, b) => {
+    const score = (seat) => {
+      const balancedRow = Math.abs(seat.row - 5);
+      const aisleBonus = seat.col === 1 || seat.col === 2 ? -0.8 : 0;
+      const premiumPenalty = seatTier(seat) === "premium" ? 1.4 : 0;
+      return balancedRow + aisleBonus + premiumPenalty;
+    };
+    return score(a) - score(b) || a.row - b.row || a.col - b.col;
+  })[0];
 }
 
 function adjacentFemaleSeatIds(seats) {
@@ -68,7 +105,29 @@ function adjacentFemaleSeatIds(seats) {
   );
 }
 
+function useButtonRipples() {
+  useEffect(() => {
+    function handlePointerDown(event) {
+      const button = event.target.closest?.("button");
+      if (!button || button.disabled || button.dataset.noRipple === "true") return;
+      const rect = button.getBoundingClientRect();
+      const ripple = document.createElement("span");
+      const size = Math.max(rect.width, rect.height) * 1.35;
+      ripple.className = "button-ripple";
+      ripple.style.width = `${size}px`;
+      ripple.style.height = `${size}px`;
+      ripple.style.left = `${event.clientX - rect.left - size / 2}px`;
+      ripple.style.top = `${event.clientY - rect.top - size / 2}px`;
+      button.appendChild(ripple);
+      window.setTimeout(() => ripple.remove(), 520);
+    }
+
+    document.addEventListener("pointerdown", handlePointerDown, { passive: true });
+    return () => document.removeEventListener("pointerdown", handlePointerDown);
+  }, []);
+}
 export default function App() {
+  useButtonRipples();
   const [dark, setDark] = useState(() => localStorage.getItem("theme") === "dark");
   const [user, setUser] = useState(null);
   const [notifications, setNotifications] = useState([]);
@@ -117,6 +176,7 @@ export default function App() {
   function handleAuth(data) {
     setTokens(data);
     setUser(data.user);
+    setSelectedScheduleId(null);
     setView("buses");
     showToast(`Welcome, ${data.user.name}.`);
   }
@@ -218,43 +278,51 @@ function DashboardExperience({
   socket,
   showToast
 }) {
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+
   function go(nextView) {
     setSelectedScheduleId(null);
     setView(nextView);
   }
 
-  const title = selectedScheduleId ? "Seat booking" : view === "admin" ? "Admin" : view === "waitlist" ? "Waitlist" : view === "rides" ? "Ride board" : "Buses";
+  const selectedSchedule = selectedScheduleId ? schedules.find((schedule) => schedule.id === selectedScheduleId) : null;
+  const title = selectedSchedule ? "Select Seat" : view === "admin" ? "Admin" : view === "bookings" ? "My bookings" : view === "about" ? "About us" : view === "home" ? "Home" : "Buses";
 
   return (
-    <div className="dashboard-shell">
+    <div className={`dashboard-shell ${sidebarCollapsed ? "sidebar-collapsed" : ""}`}>
       <aside className="sidebar">
-        <button className="brand sidebar-brand" onClick={() => go("buses")}>
-          <span className="brand-mark"><Bus size={19} /></span>
-          <span>TicketEase</span>
-        </button>
+        <div className="sidebar-top">
+          <button className="brand sidebar-brand" onClick={() => go("home")}>
+            <span className="brand-mark"><Bus size={19} /></span>
+            <span>TicketEase</span>
+          </button>
+          <button className="sidebar-toggle" onClick={() => setSidebarCollapsed(!sidebarCollapsed)} title={sidebarCollapsed ? "Show sidebar" : "Hide sidebar"}>
+            {sidebarCollapsed ? <PanelLeftOpen size={18} /> : <PanelLeftClose size={18} />}
+          </button>
+        </div>
         <nav className="sidebar-nav">
-          <button className={view === "buses" ? "active" : ""} onClick={() => go("buses")}><LayoutDashboard size={18} /> Buses</button>
-          <button className={view === "waitlist" ? "active" : ""} onClick={() => go("waitlist")}><Users size={18} /> Waitlist</button>
-          <button className={view === "rides" ? "active" : ""} onClick={() => go("rides")}><Car size={18} /> Rides</button>
-          {user.role === "admin" && <button className={view === "admin" ? "active" : ""} onClick={() => go("admin")}><ShieldCheck size={18} /> Admin</button>}
+          <button className={view === "buses" ? "active" : ""} onClick={() => go("buses")}><LayoutDashboard size={18} /><span>Buses</span></button>
+          <button className={view === "bookings" ? "active" : ""} onClick={() => go("bookings")}><WalletCards size={18} /><span>My bookings</span></button>
+          <button className={view === "about" ? "active" : ""} onClick={() => go("about")}><Route size={18} /><span>About us</span></button>
+          {user.role === "admin" && <button className={view === "admin" ? "active" : ""} onClick={() => go("admin")}><ShieldCheck size={18} /><span>Admin</span></button>}
         </nav>
       </aside>
       <section className="workspace">
         <header className="dashboard-header">
-          <div>
-            <span className="eyebrow">{title}</span>
+          <div className="header-title">
             <h1>{title}</h1>
+            {selectedSchedule && <span>{selectedSchedule.source} to {selectedSchedule.destination} / {selectedSchedule.busName} / {formatTime(selectedSchedule.departureAt)}</span>}
           </div>
           <div className="top-actions">
-            <NotificationBell notifications={notifications} />
             <ProfileMenu user={user} dark={dark} setDark={setDark} open={profileOpen} setOpen={setProfileOpen} logout={logout} />
           </div>
         </header>
         <main className="workspace-main">
           <AnimatePresence mode="wait">
+            {view === "home" && <SignedInHome key="home" onStart={() => go("buses")} />}
+            {view === "about" && <AboutView key="about" />}
+            {view === "bookings" && <MyBookingsView key="bookings" schedules={schedules} user={user} onSelect={(id) => { setView("buses"); setSelectedScheduleId(id); }} />}
             {view === "admin" && user.role === "admin" && <AdminView key="admin" locations={locations} showToast={showToast} />}
-            {view === "waitlist" && <WaitlistOverview key="waitlist" schedules={schedules} onSelect={(id) => { setView("buses"); setSelectedScheduleId(id); }} />}
-            {view === "rides" && <RideBoard key="rides" schedules={schedules} />}
             {view === "buses" && !selectedScheduleId && (
               <BusSearchView
                 key="buses"
@@ -283,6 +351,22 @@ function DashboardExperience({
 }
 
 function ProfileMenu({ user, dark, setDark, open, setOpen, logout }) {
+  useEffect(() => {
+    if (!open) return undefined;
+
+    function closeOnOutsidePress(event) {
+      if (!event.target.closest?.(".profile-menu-wrap")) setOpen(false);
+    }
+
+    document.addEventListener("pointerdown", closeOnOutsidePress);
+    return () => document.removeEventListener("pointerdown", closeOnOutsidePress);
+  }, [open, setOpen]);
+
+  function closeAfter(action) {
+    action?.();
+    setOpen(false);
+  }
+
   return (
     <div className="profile-menu-wrap">
       <button className="avatar-button" onClick={() => setOpen(!open)} title="Profile">
@@ -298,19 +382,10 @@ function ProfileMenu({ user, dark, setDark, open, setOpen, logout }) {
             <div><dt>Gender</dt><dd>{user.gender}</dd></div>
             <div><dt>Age</dt><dd>{user.age || "-"}</dd></div>
           </dl>
-          <button onClick={() => setDark(!dark)}>{dark ? <Sun size={16} /> : <Moon size={16} />} Theme</button>
-          <button onClick={logout}><LogOut size={16} /> Sign out</button>
+          <button onClick={() => closeAfter(() => setDark(!dark))}>{dark ? <Sun size={16} /> : <Moon size={16} />} Theme</button>
+          <button onClick={() => closeAfter(logout)}><LogOut size={16} /> Sign out</button>
         </div>
       )}
-    </div>
-  );
-}
-
-function NotificationBell({ notifications }) {
-  return (
-    <div className="bell" title={notifications[0]?.message || "Notifications"}>
-      <Bell size={18} />
-      {notifications.length > 0 && <span>{notifications.length}</span>}
     </div>
   );
 }
@@ -321,71 +396,127 @@ function LandingView({ onStart }) {
       <section className="landing-hero">
         <div>
           <span className="eyebrow"><CircleDot size={14} /> Real-time campus mobility</span>
-          <h1>TicketEase</h1>
-          <p>Fast seat locks, live availability, waitlist priority, and clean trip control for Amity University Raipur.</p>
+          <h1>Ticket<span className="ease-ombre">Ease</span></h1>
+          <p>Fast seat locks, live availability, instant booking, and clean trip control for Amity University Raipur.</p>
           <button className="primary" onClick={onStart}>Get started</button>
         </div>
         <SeatPreview />
       </section>
       <section className="feature-grid">
-        <div><Ticket size={22} /><h3>Atomic booking</h3><p>One seat, one winner.</p></div>
-        <div><Bell size={22} /><h3>Live updates</h3><p>No refresh needed.</p></div>
-        <div><Users size={22} /><h3>Smart waitlist</h3><p>Queue, chat, reassign.</p></div>
+        <div className="feature-card feature-wide">
+          <span><Ticket size={18} /> Choose your seats</span>
+          <h3>Pick seats live.</h3>
+          <p>Held seats pulse in amber with a tiny timer, so you know what is moving.</p>
+        </div>
+        <div className="feature-card">
+          <span><Timer size={18} /> 6 minute hold</span>
+          <h3>Checkout calmly.</h3>
+          <p>Click a seat and an atomic lock keeps it yours while you finish.</p>
+        </div>
+        <div className="feature-card">
+          <span><Check size={18} /> Instant booking</span>
+          <h3>Tap, pay, done.</h3>
+          <p>Confirmed seats update on every screen immediately.</p>
+        </div>
       </section>
+
     </motion.section>
   );
 }
 
 function SeatPreview() {
+  const seats = Array.from({ length: 32 }, (_, index) => {
+    const number = index + 1;
+    let status = "available";
+    if ([3, 8, 13, 19, 24, 30].includes(number)) status = "unavailable";
+    if ([5, 6, 9, 10].includes(number)) status = "premium";
+    if ([15, 16].includes(number)) status = "selected";
+    return { number, status };
+  });
+
   return (
-    <div className="live-map" aria-hidden="true">
-      <div className="bus-window" />
-      <div className="aisle-light" />
-      {Array.from({ length: 20 }, (_, index) => {
-        const status = index % 6 === 0 ? "booked" : index % 5 === 0 ? "held" : "available";
-        return (
-          <span key={index} className={status} style={{ "--i": index }}>
-            <i />
-            <b>{index + 1}</b>
-          </span>
-        );
-      })}
+    <div className="phone-showcase" aria-label="TicketEase live booking phone mockup">
+      <div className="phone-glow" />
+      <div className="phone-shadow" />
+      <div className="phone-device">
+        <div className="dynamic-island" />
+        <div className="phone-screen">
+          <div className="phone-status"><span>TicketEase</span><b>LIVE</b></div>
+          <div className="phone-trip-card">
+            <span>BUS 7A</span>
+            <h3>Shankar Nagar <small>to</small> Amity University Raipur</h3>
+            <div><b>2:37 PM</b><em>24 Seats Left</em></div>
+          </div>
+          <div className="phone-seat-toolbar">
+            <span>Pick seats</span>
+            <small>2 + 2 layout</small>
+          </div>
+          <div className="phone-seat-map">
+            {seats.map((seat, index) => (
+              <React.Fragment key={seat.number}>
+                {index % 4 === 2 && <i className="phone-aisle" />}
+                <span className={`phone-seat ${seat.status}`} style={{ "--seat-index": index }}>{seat.number}</span>
+              </React.Fragment>
+            ))}
+          </div>
+        </div>
+      </div>
+      <div className="phone-info-card">
+        <b>BUS 7A</b>
+        <span>{"Shankar Nagar ? Amity University Raipur"}</span>
+        <strong>2:37 PM</strong>
+        <em>24 Seats Left</em>
+      </div>
     </div>
   );
 }
 
-function WaitlistOverview({ schedules, onSelect }) {
+function SignedInHome({ onStart }) {
+  return <LandingView onStart={onStart} />;
+}
+
+function AboutView() {
   return (
-    <motion.section className="page-stack" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}>
-      <div className="task-grid">
-        {schedules.map((schedule) => (
-          <button className="task-card" key={schedule.id} onClick={() => onSelect(schedule.id)}>
-            <span>{formatTime(schedule.departureAt)}</span>
-            <b>{schedule.source} {"->"} {schedule.destination}</b>
-            <small>{schedule.counts.available} open seats</small>
-          </button>
-        ))}
+    <motion.section className="about-page" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}>
+      <div className="about-hero" data-reveal>
+        <span className="eyebrow"><CircleDot size={14} /> About TicketEase</span>
+        <h2>Campus bus booking without the rush.</h2>
+        <p>TicketEase helps Amity University Raipur students find buses, hold seats, confirm tickets, and see live availability in one clean workspace.</p>
+      </div>
+      <div className="about-grid" data-reveal>
+        <div><Ticket size={22} /><h3>Live seat maps</h3><p>See available, held, and booked seats before you choose.</p></div>
+        <div><Timer size={22} /><h3>6 minute holds</h3><p>A temporary lock gives you time to finish checkout.</p></div>
+        <div><ShieldCheck size={22} /><h3>Safer booking</h3><p>Backend validation and database locks protect against double booking.</p></div>
       </div>
     </motion.section>
   );
 }
 
-function RideBoard({ schedules }) {
+function MyBookingsView({ schedules, user, onSelect }) {
+  const bookings = schedules.flatMap((schedule) =>
+    schedule.seats
+      .filter((seat) => seat.status === "booked" && seat.bookedBy === user.id)
+      .map((seat) => ({ schedule, seat }))
+  );
+
   return (
     <motion.section className="page-stack" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}>
-      <div className="task-grid">
-        {schedules.map((schedule) => (
-          <div className="task-card" key={schedule.id}>
-            <span>{formatTime(schedule.departureAt)}</span>
-            <b>{schedule.source} {"->"} {schedule.destination}</b>
-            <small>{(schedule.rides || []).length} ride requests</small>
-          </div>
-        ))}
-      </div>
+      {bookings.length === 0 ? (
+        <div className="empty-state"><Ticket size={24} /><h2>No bookings yet</h2><p>Your confirmed seats will appear here.</p></div>
+      ) : (
+        <div className="task-grid">
+          {bookings.map(({ schedule, seat }) => (
+            <button className="task-card" key={`${schedule.id}-${seat.id}`} onClick={() => onSelect(schedule.id)}>
+              <span>{formatTime(schedule.departureAt)}</span>
+              <b>{schedule.source} {"->"} {schedule.destination}</b>
+              <small>Seat {seat.label} / {schedule.busName}</small>
+            </button>
+          ))}
+        </div>
+      )}
     </motion.section>
   );
 }
-
 function AuthView({ onAuth, showToast }) {
   const [mode, setMode] = useState("login");
   const [form, setForm] = useState({ name: "", email: "", password: "Password123", gender: "female", age: "", universityId: "" });
@@ -408,13 +539,8 @@ function AuthView({ onAuth, showToast }) {
     <motion.section className="auth-layout" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
       <div className="auth-hero">
         <span className="eyebrow"><CircleDot size={14} /> Real-time bus booking platform</span>
-        <h1>The seat you tap is yours in milliseconds.</h1>
-        <p>Live locks, rotating refresh tokens, Supabase-ready row locks, waitlist chat, and check-in automation for Amity University Raipur students.</p>
-        <div className="metric-strip">
-          <strong>6 min</strong><span>seat hold</span>
-          <strong>1 hr</strong><span>booking window</span>
-          <strong>0</strong><span>double bookings</span>
-        </div>
+        <h1>The seat you tap is yours <span className="green-ombre-text">in milliseconds.</span></h1>
+        <p>Live locks, rotating refresh tokens, Supabase-ready row locks, and instant campus bus booking for Amity University Raipur students.</p>
       </div>
       <form className="auth-card" onSubmit={submit}>
         <h2>{mode === "login" ? "Welcome back" : "Create account"}</h2>
@@ -446,8 +572,9 @@ function AuthView({ onAuth, showToast }) {
 }
 
 function BusSearchView({ locations, schedules, setSchedules, onSelect, showToast }) {
-  const [source, setSource] = useState("Amity University Raipur");
+  const [source, setSource] = useState("");
   const [destination, setDestination] = useState("");
+  const visibleSchedules = pickVisibleSchedules(schedules);
 
   async function search(event) {
     event.preventDefault();
@@ -464,31 +591,31 @@ function BusSearchView({ locations, schedules, setSchedules, onSelect, showToast
 
   return (
     <motion.section className="page-stack" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}>
-      <form className="search-panel" onSubmit={search}>
-        <label>Source<select value={source} onChange={(e) => setSource(e.target.value)}>{locations.map((item) => <option key={item}>{item}</option>)}</select></label>
-        <label>Destination<select value={destination} onChange={(e) => setDestination(e.target.value)}><option value="">Any Raipur location</option>{locations.filter((item) => item !== source).map((item) => <option key={item}>{item}</option>)}</select></label>
-        <button className="primary"><Search size={18} /> Search buses</button>
+      <form className="search-panel" onSubmit={search} data-reveal>
+        <label>Source<select value={source} onChange={(e) => setSource(e.target.value)}><option value="">Any source</option>{locations.map((item) => <option key={item}>{item}</option>)}</select></label>
+        <label>Destination<select value={destination} onChange={(e) => setDestination(e.target.value)}><option value="">Any destination</option>{locations.filter((item) => item !== source).map((item) => <option key={item}>{item}</option>)}</select></label>
+        <button className="primary search-button" type="submit"><Search size={18} /> Search</button>
       </form>
 
       <div className="section-title">
         <h2>Available schedules</h2>
-        <span className="pill"><CircleDot size={10} /> live seat counts</span>
       </div>
       <div className="schedule-list">
-        {schedules.map((schedule) => <ScheduleCard key={schedule.id} schedule={schedule} onSelect={() => onSelect(schedule.id)} />)}
+        {visibleSchedules.map((schedule, index) => <ScheduleCard key={schedule.id} schedule={schedule} forceSoon={isDepartingSoon(schedule)} onSelect={() => onSelect(schedule.id)} />)}
       </div>
     </motion.section>
   );
 }
 
-function ScheduleCard({ schedule, onSelect }) {
+function ScheduleCard({ schedule, forceSoon, onSelect }) {
   const state = bookingState(schedule);
+  const soon = forceSoon ?? isDepartingSoon(schedule);
   return (
-    <button className={`schedule-card ${state === "departed" ? "departed" : ""}`} onClick={onSelect}>
+    <button className={`schedule-card ${state} ${soon ? "soon" : ""}`} onClick={onSelect} data-reveal>
       <div className="time-block"><strong>{formatTime(schedule.departureAt)}</strong><span>{schedule.busName}</span></div>
       <div className="route-block">
           <b>{schedule.source}</b><span>{"->"}</span><b>{schedule.destination}</b>
-        <small>{state === "locked" ? `opens in ${countdownTo(schedule.bookingOpenAt)}` : state}</small>
+        <small>{state === "departed" ? "Departed" : soon ? "Leaving soon" : "Book anytime"}</small>
       </div>
       <div className="capacity">
         <span>{schedule.counts.available} seats left</span>
@@ -501,19 +628,16 @@ function ScheduleCard({ schedule, onSelect }) {
 
 function ScheduleView({ scheduleId, user, socket, showToast, onBack }) {
   const [schedule, setSchedule] = useState(null);
-  const [waitlist, setWaitlist] = useState([]);
-  const [preferFemale, setPreferFemale] = useState(false);
   const [suggestions, setSuggestions] = useState([]);
   const [holds, setHolds] = useState([]);
-  const [chat, setChat] = useState("");
-  const [ride, setRide] = useState({ seatsNeeded: 1, notes: "" });
+  const [suggestionModal, setSuggestionModal] = useState(null);
+  const [suggestionSeen, setSuggestionSeen] = useState(false);
+  const [paymentWarning, setPaymentWarning] = useState(false);
+  const [finder, setFinder] = useState({ groupSize: 2, budget: "any", mode: "together" });
 
   useEffect(() => {
     api(`/schedules/${scheduleId}`)
-      .then((data) => {
-        setSchedule(data.schedule);
-        setWaitlist(data.waitlist);
-      })
+      .then((data) => setSchedule(data.schedule))
       .catch(showToast);
   }, [scheduleId]);
 
@@ -521,55 +645,128 @@ function ScheduleView({ scheduleId, user, socket, showToast, onBack }) {
     if (!socket) return;
     socket.emit("schedule:join", scheduleId);
     socket.on("schedule:update", (next) => next.id === scheduleId && setSchedule(next));
-    socket.on("waitlist:update", setWaitlist);
-    socket.on("chat:new", (message) => setSchedule((current) => current ? { ...current, chat: [...current.chat, message] } : current));
-    socket.on("ride:new", (item) => setSchedule((current) => current ? { ...current, rides: [...current.rides, item] } : current));
     return () => {
       socket.emit("schedule:leave", scheduleId);
       socket.off("schedule:update");
-      socket.off("waitlist:update");
-      socket.off("chat:new");
-      socket.off("ride:new");
     };
   }, [socket, scheduleId]);
 
   useEffect(() => {
-    if (preferFemale && user?.gender === "female") {
+    if (user?.gender === "female") {
       api(`/schedules/${scheduleId}/female-suggestions`)
         .then((data) => setSuggestions(data.suggestions))
         .catch(showToast);
     } else {
       setSuggestions([]);
     }
-  }, [preferFemale, scheduleId, user?.gender]);
+  }, [scheduleId, user?.gender]);
+  useEffect(() => {
+    if (!holds.length) {
+      setPaymentWarning(false);
+      return undefined;
+    }
+    const earliestExpiry = Math.min(...holds.map((seat) => new Date(seat.lockExpiresAt).getTime()));
+    const delay = Math.max(0, earliestExpiry - Date.now());
+    const timer = window.setTimeout(() => setPaymentWarning(true), delay);
+    return () => window.clearTimeout(timer);
+  }, [holds]);
 
-  async function lockSeat(seat) {
-    if (!user) return showToast("Sign in to hold a seat.");
-    if (bookingState(schedule) !== "open") return showToast("Booking is not open for this bus yet.");
-    const activeHold = holds.find((item) => item.id === seat.id);
-    if (activeHold) return releaseHold(activeHold);
-    if (seat.status !== "available") return showToast("That seat is unavailable.");
+  async function holdSeat(seat) {
+    const optimisticSeat = {
+      ...seat,
+      status: "locked",
+      lockId: `pending-${seat.id}`,
+      lockExpiresAt: new Date(Date.now() + 6 * 60_000).toISOString(),
+      lockedBy: user.id,
+      passengerGender: user.gender || "other",
+      isPending: true
+    };
+
+    setHolds((current) => [
+      ...current.filter((item) => item.id !== seat.id),
+      optimisticSeat
+    ]);
+
     try {
       const data = await api(`/schedules/${scheduleId}/seats/${seat.id}/lock`, { method: "POST" });
       setHolds((current) => [
         ...current.filter((item) => item.id !== data.seat.id),
-        { ...data.seat, passengerGender: user.gender || "other" }
+        { ...data.seat, passengerGender: optimisticSeat.passengerGender }
       ]);
       setSchedule(data.schedule);
     } catch (error) {
+      setHolds((current) => current.filter((item) => item.id !== seat.id));
       showToast(error);
     }
   }
 
+
+  async function findSeats() {
+    if (bookingState(schedule) !== "bookable") return showToast("This bus has departed.");
+    const groupSize = Math.max(1, Math.min(6, Number(finder.groupSize) || 1));
+    const heldIds = new Set(holds.map((seat) => seat.id));
+    const available = schedule.seats
+      .filter((seat) => seat.status === "available" && !heldIds.has(seat.id))
+      .filter((seat) => finder.budget === "any" || seatTier(seat) === finder.budget);
+
+    const ordered = [...available].sort((a, b) => {
+      if (finder.mode === "back") return b.row - a.row || a.col - b.col;
+      return a.row - b.row || a.col - b.col;
+    });
+
+    let picked = [];
+    if (finder.mode === "together") {
+      const sides = [[0, 1], [2, 3]];
+      for (const row of [...new Set(ordered.map((seat) => seat.row))]) {
+        for (const side of sides) {
+          const rowSeats = ordered.filter((seat) => seat.row === row && side.includes(seat.col));
+          if (rowSeats.length >= Math.min(groupSize, 2)) picked.push(...rowSeats.slice(0, Math.min(groupSize, 2)));
+          if (picked.length >= groupSize) break;
+        }
+        if (picked.length >= groupSize) break;
+      }
+      if (picked.length < groupSize) picked = [...picked, ...ordered.filter((seat) => !picked.some((item) => item.id === seat.id))].slice(0, groupSize);
+    } else if (finder.mode === "aisle") {
+      picked = ordered.filter((seat) => seat.col === 1 || seat.col === 2).slice(0, groupSize);
+    } else {
+      picked = ordered.slice(0, groupSize);
+    }
+
+    if (picked.length < groupSize) return showToast("Not enough matching seats are available.");
+    for (const seat of picked) {
+      await holdSeat(seat);
+    }
+    showToast(`${picked.length} seat${picked.length > 1 ? "s" : ""} held for you.`);
+  }
+  async function lockSeat(seat) {
+    if (!user) return showToast("Sign in to hold a seat.");
+    if (bookingState(schedule) !== "bookable") return showToast("This bus has departed.");
+    const activeHold = holds.find((item) => item.id === seat.id);
+    if (activeHold) return releaseHold(activeHold);
+    if (seat.status !== "available") return showToast("That seat is unavailable.");
+    if (user.gender === "female" && !suggestionSeen && schedule.seats.some((item) => item.status === "booked" && item.passengerGender === "female")) {
+      setSuggestionSeen(true);
+      setSuggestionModal({ seat });
+      return;
+    }
+    return holdSeat(seat);
+  }
+
   async function releaseHold(seat) {
+    setHolds((current) => current.filter((item) => item.id !== seat.id));
+    if (seat.isPending) return;
+
     try {
       const data = await api(`/schedules/${scheduleId}/seats/${seat.id}/lock`, {
         method: "DELETE",
         body: { lockId: seat.lockId }
       });
-      setHolds((current) => current.filter((item) => item.id !== seat.id));
       setSchedule(data.schedule);
     } catch (error) {
+      setHolds((current) => [
+        ...current.filter((item) => item.id !== seat.id),
+        seat
+      ]);
       showToast(error);
     }
   }
@@ -584,202 +781,184 @@ function ScheduleView({ scheduleId, user, socket, showToast, onBack }) {
       const data = await api(`/schedules/${scheduleId}/bookings/confirm`, {
         method: "POST",
         body: {
-          preferFemale,
+          preferFemale: user.gender === "female",
           seats: holds.map((seat) => ({ seatId: seat.id, lockId: seat.lockId, passengerGender: seat.passengerGender || user.gender || "other" }))
         }
       });
       const confirmed = new Set(data.seats.map((seat) => seat.id));
       setHolds((current) => current.filter((item) => !confirmed.has(item.id)));
       setSchedule(data.schedule);
-      showToast(`${data.seats.length} seat${data.seats.length > 1 ? "s" : ""} confirmed.`);
+      showToast(`${data.seats.length} seat${data.seats.length > 1 ? "s are" : " is"} booked.`);
     } catch (error) {
       showToast(error);
     }
-  }
-
-  async function joinWaitlist() {
-    try {
-      const data = await api(`/schedules/${scheduleId}/waitlist`, { method: "POST" });
-      setWaitlist(data.waitlist);
-      showToast(`You are waitlist position ${data.position}.`);
-    } catch (error) {
-      showToast(error);
-    }
-  }
-
-  async function checkIn() {
-    try {
-      const data = await api(`/schedules/${scheduleId}/check-in`, { method: "POST" });
-      setSchedule(data.schedule);
-      showToast("Check-in confirmed.");
-    } catch (error) {
-      showToast(error);
-    }
-  }
-
-  async function sendChat(event) {
-    event.preventDefault();
-    if (!chat.trim()) return;
-    await api(`/schedules/${scheduleId}/chat`, { method: "POST", body: { message: chat } }).catch(showToast);
-    setChat("");
-  }
-
-  async function postRide(event) {
-    event.preventDefault();
-    await api(`/schedules/${scheduleId}/rides`, { method: "POST", body: { ...ride, from: schedule.source, to: schedule.destination } }).catch(showToast);
-    setRide({ seatsNeeded: 1, notes: "" });
   }
 
   if (!schedule) return <div className="loading">Loading schedule...</div>;
 
   const state = bookingState(schedule);
-  const allUnavailable = schedule.counts.available === 0;
   const femaleAdjacentSeatIds = adjacentFemaleSeatIds(schedule.seats);
+  const femaleBookedSeats = schedule.seats.filter((seat) => seat.status === "booked" && seat.passengerGender === "female");
+  const recommendedSeat = getRecommendedSeat(schedule.seats);
 
   return (
     <motion.section className="detail-grid" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}>
-      <button className="back-button" onClick={onBack}><ChevronLeft size={18} /> Today&apos;s schedule</button>
-      <section className="trip-header">
-        <div className="trip-title">
-          <span className="brand-mark"><Bus size={24} /></span>
-            <div><h1>{schedule.source} {"->"} {schedule.destination}</h1><p>{schedule.busName} - {formatDate(schedule.departureAt)}</p></div>
-        </div>
-        <div className="trip-time"><strong>{formatTime(schedule.departureAt)}</strong><span className={`pill ${state === "departed" ? "departed-pill" : ""}`}>{state === "locked" ? `opens ${countdownTo(schedule.bookingOpenAt)}` : state}</span></div>
-      </section>
-
-      <section className="timeline">
-        <span><b>{formatTime(schedule.bookingOpenAt)}</b>booking opens</span>
-        <span><b>{formatTime(schedule.checkInStartAt)}</b>check-in starts</span>
-        <span><b>{formatTime(schedule.reallocationAt)}</b>unconfirmed released</span>
-      </section>
-
-      {state === "locked" && <div className="notice"><CalendarClock size={18} /> Booking opens in {countdownTo(schedule.bookingOpenAt)}. Seat buttons are disabled until then.</div>}
-
-      <section className="booking-grid">
-        <div className="seat-panel">
-          <div className="panel-head">
-            <div><h2>Interactive seat map</h2><p>{schedule.counts.available} available / {schedule.counts.locked} held / {schedule.counts.booked} booked</p></div>
-            <button className="secondary" onClick={checkIn}><ShieldCheck size={18} /> Check in</button>
+      <button className="back-button" onClick={onBack}><ChevronLeft size={18} /> Schedules</button>
+      <section className="booking-grid select-seat-layout">
+        <div className="seat-panel select-seat-panel">
+          <div className="select-seat-screen-head">
+            <button className="select-back-button" onClick={onBack} aria-label="Back to schedules"><ChevronLeft size={18} /></button>
+            <h2>Select Seat</h2>
+            <span />
           </div>
-          {user?.gender === "female" && (
-            <label className="preference">
-              <input type="checkbox" checked={preferFemale} onChange={(e) => setPreferFemale(e.target.checked)} />
-              Prefer Female Co-Passenger
-            </label>
-          )}
-          <SeatMap seats={schedule.seats} disabled={state !== "open"} onSeatClick={lockSeat} holds={holds} suggestions={suggestions} femaleAdjacentSeatIds={femaleAdjacentSeatIds} />
-          <div className="legend">
-            <span className="available" /> Available <span className="held" /> Held <span className="female-booked" /> Female <span className="male-booked" /> Male <span className="selected" /> Selected
+          <div className="legend select-seat-legend">
+            <span className="available" /> Available <span className="selected" /> Selected <span className="booked" /> Unavailable
+          </div>
+          <div className="select-seat-stage">
+            <SeatMap seats={schedule.seats} disabled={state !== "bookable"} onSeatClick={lockSeat} holds={holds} suggestions={suggestions} femaleAdjacentSeatIds={femaleAdjacentSeatIds} previewSeatLabel={recommendedSeat?.label} />
           </div>
         </div>
 
-        <aside className="side-stack">
-          <HoldCard holds={holds} onPay={confirmPayment} onGenderChange={updateHoldGender} />
-          <SuggestionCard suggestions={suggestions} onPick={(seatId) => lockSeat(schedule.seats.find((seat) => seat.id === seatId))} />
-          <WaitlistCard waitlist={waitlist} allUnavailable={allUnavailable} onJoin={joinWaitlist} />
+        <aside className="side-stack select-checkout-stack">
+          <HoldCard
+            holds={holds}
+            fallbackSeat={recommendedSeat}
+            onFallbackContinue={() => {
+              if (recommendedSeat) lockSeat(recommendedSeat);
+            }}
+            onPay={confirmPayment}
+            onGenderChange={updateHoldGender}
+          />
         </aside>
       </section>
 
-      <section className="collab-grid">
-        <div className="collab-panel">
-          <h2>Waitlist group chat</h2>
-          <div className="chat-box">
-            {(schedule.chat || []).slice(-6).map((item) => <p key={item.id}><b>{item.name}</b> {item.message}</p>)}
-          </div>
-          <form onSubmit={sendChat} className="inline-form">
-            <input value={chat} onChange={(e) => setChat(e.target.value)} placeholder="Coordinate alternatives during peak rush" />
-            <button className="primary">Send</button>
-          </form>
-        </div>
-        <div className="collab-panel">
-          <h2>Shared ride requests</h2>
-          <div className="ride-list">
-            {(schedule.rides || []).slice(-4).map((item) => <p key={item.id}><b>{item.name}</b> needs {item.seatsNeeded} seat(s). {item.notes}</p>)}
-          </div>
-          <form onSubmit={postRide} className="inline-form ride-form">
-            <input type="number" min="1" max="6" value={ride.seatsNeeded} onChange={(e) => setRide({ ...ride, seatsNeeded: e.target.value })} />
-            <input value={ride.notes} onChange={(e) => setRide({ ...ride, notes: e.target.value })} placeholder="Carpool note" />
-            <button className="primary">Post</button>
-          </form>
-        </div>
-      </section>
+      {paymentWarning && holds.length > 0 && <PaymentWarning onPay={confirmPayment} onClose={() => setPaymentWarning(false)} />}
+
+      {suggestionModal && (
+        <SuggestionModal
+          suggestions={suggestions}
+          femaleBookedSeats={femaleBookedSeats}
+          onClose={() => setSuggestionModal(null)}
+          onContinue={() => {
+            const seat = suggestionModal.seat;
+            setSuggestionModal(null);
+            holdSeat(seat);
+          }}
+          onPick={(seatId) => {
+            const seat = schedule.seats.find((item) => item.id === seatId);
+            setSuggestionModal(null);
+            if (seat) holdSeat(seat);
+          }}
+        />
+      )}
     </motion.section>
   );
 }
 
-function SeatMap({ seats, disabled, onSeatClick, holds, suggestions, femaleAdjacentSeatIds }) {
+function PaymentWarning({ onPay, onClose }) {
+  return (
+    <div className="payment-float">
+      <button onClick={onClose} className="payment-float-close">x</button>
+      <b>Make payment now</b>
+      <span>Your hold time has passed. Complete payment before the seat is taken by someone else.</span>
+      <button className="primary" onClick={onPay}>Pay now</button>
+    </div>
+  );
+}
+
+function SuggestionModal({ suggestions, femaleBookedSeats, onClose, onContinue, onPick }) {
+  return (
+    <div className="modal-backdrop" role="dialog" aria-modal="true">
+      <div className="suggestion-modal">
+        <button className="modal-close" onClick={onClose}>x</button>
+        <span className="eyebrow"><Users size={14} /> Female preference</span>
+        <h2>Nearby female seats are available</h2>
+        <p>You can choose a seat beside an already confirmed female passenger, or continue with your selected seat.</p>
+        {femaleBookedSeats.length > 0 && <div className="female-seat-list"><b>Female booked seats</b><span>{femaleBookedSeats.map((seat) => seat.label).join(", ")}</span></div>}
+        <div className="suggestion-list">
+          {suggestions.length > 0 ? suggestions.map((item) => <button key={item.seatId} onClick={() => onPick(item.seatId)}>Seat {item.label}<small>{item.reason}</small></button>) : <p>No adjacent female-preference seat is open right now.</p>}
+        </div>
+        <button className="primary wide" onClick={onContinue}>Continue with selected seat</button>
+      </div>
+    </div>
+  );
+}
+
+function SeatMap({ seats, disabled, onSeatClick, holds, suggestions, femaleAdjacentSeatIds, previewSeatLabel = null }) {
   const suggestionIds = new Set(suggestions.map((item) => item.seatId));
   const heldIds = new Set(holds.map((seat) => seat.id));
-  return (
-    <div className="seat-map">
-      {seats.map((seat) => {
-        const bookedGenderClass = seat.status === "booked" && seat.passengerGender ? `${seat.passengerGender}-booked` : "";
-        const adjacentClass = femaleAdjacentSeatIds.has(seat.id) ? "female-adjacent" : "";
-        return (
-          <button
-            key={seat.id}
-            disabled={disabled || (seat.status !== "available" && !heldIds.has(seat.id))}
-            className={`seat ${seat.status} ${bookedGenderClass} ${adjacentClass} ${heldIds.has(seat.id) ? "selected" : ""} ${suggestionIds.has(seat.id) ? "suggested" : ""}`}
-            onClick={() => onSeatClick(seat)}
-            title={femaleAdjacentSeatIds.has(seat.id) ? "Female adjacent preference seat" : seat.status}
-          >
-            {seat.label}
-          </button>
-        );
-      })}
-    </div>
-  );
-}
+  const columns = ["A", "B", "C", "D"];
+  const totalRows = Math.max(...seats.map((seat) => seat.row), 9);
+  const rows = Array.from({ length: totalRows }, (_, index) => index + 1);
+  const seatByLabel = new Map(seats.map((seat) => [seat.label, seat]));
 
-function HoldCard({ holds, onPay, onGenderChange }) {
-  if (!holds.length) {
-    return <div className="info-card"><Ticket size={22} /><h3>No seats held</h3></div>;
+  function renderSeat(seat) {
+    if (!seat) return <span className="seat-cell empty" />;
+    const bookedGenderClass = seat.status === "booked" && seat.passengerGender ? `${seat.passengerGender}-booked` : "";
+    const adjacentClass = femaleAdjacentSeatIds.has(seat.id) ? "female-adjacent" : "";
+    const isHeld = heldIds.has(seat.id);
+    const isPreview = !holds.length && previewSeatLabel && seat.label === previewSeatLabel && seat.status === "available";
+    const unavailable = seat.status !== "available" && !isHeld;
+    return (
+      <button
+        key={seat.id}
+        disabled={disabled || unavailable}
+        className={`seat ${seat.status} ${seatTier(seat)} ${bookedGenderClass} ${adjacentClass} ${isHeld || isPreview ? "selected" : ""} ${suggestionIds.has(seat.id) ? "suggested" : ""}`}
+        onClick={() => onSeatClick(seat)}
+        title={`${seat.label} / ${seatTier(seat)} / ${formatSeatPrice(seat)}`}
+        aria-label={`${seat.label} ${seatTier(seat)} ${formatSeatPrice(seat)}`}
+      >
+        {unavailable ? <span className="seat-x">x</span> : <><span>{seat.label.replace(/^\d+/, "")}</span>{seatTier(seat) === "premium" && <small className="premium-tag">p</small>}</>}
+      </button>
+    );
   }
-  const expiresAt = holds.map((seat) => new Date(seat.lockExpiresAt).getTime()).sort((a, b) => a - b)[0];
+
   return (
-    <div className="info-card accent">
-      <WalletCards size={22} />
-      <h3>{holds.length} seat{holds.length > 1 ? "s" : ""} held</h3>
-      <p>{holds.map((seat) => seat.label).join(", ")} / expires {countdownTo(expiresAt)}</p>
-      <div className="seat-gender-list">
-        {holds.map((seat) => (
-          <label key={seat.id}>
-            <span>{seat.label}</span>
-            <select value={seat.passengerGender || "other"} onChange={(event) => onGenderChange(seat.id, event.target.value)}>
-              <option value="female">Female</option>
-              <option value="male">Male</option>
-              <option value="other">Other</option>
-            </select>
-          </label>
+    <div className="select-seat-map-card">
+      <div className="select-column-heads"><span>A</span><span>B</span><i /><span>C</span><span>D</span></div>
+      <div className="select-seat-grid">
+        {rows.map((row) => (
+          <div className="select-seat-row" style={{ "--row-index": row }} key={row}>
+            {renderSeat(seatByLabel.get(`${row}${columns[0]}`))}
+            {renderSeat(seatByLabel.get(`${row}${columns[1]}`))}
+            <span className="select-row-number">{row}</span>
+            {renderSeat(seatByLabel.get(`${row}${columns[2]}`))}
+            {renderSeat(seatByLabel.get(`${row}${columns[3]}`))}
+          </div>
         ))}
       </div>
-      <button className="primary wide" onClick={onPay}><Check size={18} /> Pay and confirm</button>
     </div>
   );
 }
 
-function SuggestionCard({ suggestions, onPick }) {
-  if (!suggestions.length) {
-    return <div className="info-card"><Users size={22} /><h3>Female preference</h3><p>No matching adjacent seat is currently available. Normal booking can continue.</p></div>;
-  }
+function HoldCard({ holds, fallbackSeat, onFallbackContinue, onPay, onGenderChange }) {
+  const hasHolds = holds.length > 0;
+  const displaySeat = hasHolds ? holds.map((seat) => seat.label).join(", ") : fallbackSeat?.label || "-";
+  const total = hasHolds ? holds.reduce((sum, seat) => sum + seatPrice(seat), 0) : fallbackSeat ? seatPrice(fallbackSeat) : 0;
   return (
-    <div className="info-card">
-      <Users size={22} />
-      <h3>Suggested seats</h3>
-      {suggestions.map((item) => <button className="suggestion-row" key={item.seatId} onClick={() => onPick(item.seatId)}>Seat {item.label}<small>{item.reason}</small></button>)}
-    </div>
-  );
-}
-
-function WaitlistCard({ waitlist, allUnavailable, onJoin }) {
-  return (
-    <div className="info-card">
-      <h3>Waiting list <span className="pill">{waitlist.length} waiting</span></h3>
-      <p>{waitlist.length ? "Seats released at minute 50 go to this queue automatically." : "Nobody is waiting yet."}</p>
-      <button className="secondary wide" onClick={onJoin}>{allUnavailable ? "Join waitlist" : "Join backup waitlist"}</button>
-      <div className="waitlist">
-        {waitlist.slice(0, 5).map((item) => <span key={item.id}>#{item.position} {item.name}</span>)}
-      </div>
+    <div className="info-card accent select-summary-card">
+      <h3>Booking details</h3>
+      <dl className="select-summary-list">
+        <div><dt>{hasHolds ? "Your Seat" : "Recommended Seat"}</dt><dd>{hasHolds ? `Seat ${displaySeat}` : fallbackSeat ? `Seat ${displaySeat}` : "Choose a seat"}</dd></div>
+        <div><dt>Total Price</dt><dd>Rs {total}</dd></div>
+      </dl>
+      {!hasHolds && <p className="ticket-suggestion">Recommended for comfort. Tap any seat on the map to change it.</p>}
+      <div className="fare-summary"><span>General <b>Rs 449</b></span><span>Premium <b>Rs 649</b></span></div>
+      {hasHolds && (
+        <div className="seat-gender-list compact">
+          {holds.map((seat) => (
+            <label key={seat.id}>
+              <span>{seat.label}</span>
+              <select value={seat.passengerGender || "other"} onChange={(event) => onGenderChange(seat.id, event.target.value)}>
+                <option value="female">Female</option>
+                <option value="male">Male</option>
+                <option value="other">Other</option>
+              </select>
+            </label>
+          ))}
+        </div>
+      )}
+      <button className="primary wide continue-button" disabled={!hasHolds && !fallbackSeat} onClick={hasHolds ? onPay : onFallbackContinue}>{hasHolds ? "Continue" : "Use recommended"}</button>
     </div>
   );
 }
