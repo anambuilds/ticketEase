@@ -213,11 +213,7 @@ export class MemoryStore {
       const schedule = this.schedules.get(scheduleId);
       if (!schedule) throw Object.assign(new Error("Schedule not found."), { status: 404 });
 
-      const windows = scheduleWindow(schedule.departureAt);
       const now = new Date();
-      if (now < windows.bookingOpenAt) {
-        throw Object.assign(new Error("Booking opens one hour before departure."), { status: 423 });
-      }
       if (now >= new Date(schedule.departureAt)) {
         throw Object.assign(new Error("This bus has departed."), { status: 410 });
       }

@@ -16,7 +16,7 @@ export const BUS_NAMES = [
 
 export function makeScheduleTimes() {
   const now = new Date();
-  const slots = Array.from({ length: 7 }, (_, index) => 60 + index * 30).map((minutes) => {
+  const slots = Array.from({ length: 10 }, (_, index) => 10 + index * 30).map((minutes) => {
     const date = new Date(now.getTime() + minutes * 60_000);
     date.setSeconds(0, 0);
     return date;
@@ -28,8 +28,11 @@ export function makeScheduleTimes() {
     ["Amity University Raipur", "Shankar Nagar", slots[2], "AUR Shuttle 2"],
     ["Shankar Nagar", "Amity University Raipur", slots[3], "AUR Shuttle 2"],
     ["Amity University Raipur", "Ambuja Mall", slots[4], "AUR Express 3"],
-    ["VIP Road", "Amity University Raipur", slots[5], "AUR Evening Loop"],
-    ["Amity University Raipur", "Marine Drive", slots[5], "AUR Evening Loop"]
+    ["Ambuja Mall", "Amity University Raipur", slots[5], "AUR Express 3"],
+    ["Amity University Raipur", "VIP Road", slots[6], "AUR CityLink 4"],
+    ["VIP Road", "Amity University Raipur", slots[7], "AUR CityLink 4"],
+    ["Amity University Raipur", "Marine Drive", slots[8], "AUR Evening Loop"],
+    ["Marine Drive", "Amity University Raipur", slots[9], "AUR Evening Loop"]
   ];
 }
 

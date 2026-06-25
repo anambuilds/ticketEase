@@ -166,7 +166,7 @@ export class PostgresStore {
     }
 
     const scheduleState = await this.pool.query("select count(*)::int as count, max(departure_at) as latest_departure from schedules");
-    if (scheduleState.rows[0].count > 0 && new Date(scheduleState.rows[0].latest_departure) > new Date()) return;
+    if (scheduleState.rows[0].count >= 10 && new Date(scheduleState.rows[0].latest_departure) > new Date()) return;
     if (scheduleState.rows[0].count > 0) {
       await this.pool.query("truncate schedules, buses, routes restart identity cascade");
     }
@@ -423,9 +423,7 @@ export class PostgresStore {
       const scheduleResult = await client.query("select * from schedules where id = $1", [scheduleId]);
       const schedule = scheduleResult.rows[0];
       if (!schedule) raise("Schedule not found.", 404);
-      const windows = scheduleWindow(schedule.departure_at);
       const now = new Date();
-      if (now < windows.bookingOpenAt) raise("Booking opens one hour before departure.", 423);
       if (now >= new Date(schedule.departure_at)) raise("This bus has departed.", 410);
 
       const seatResult = await client.query(

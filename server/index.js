@@ -286,10 +286,14 @@ app.use((err, _req, res, _next) => {
 await store.init();
 
 setInterval(async () => {
-  const lockUpdates = await store.releaseExpiredLocks();
-  lockUpdates.forEach(emitSchedule);
-  const reallocations = await store.runReallocation();
-  reallocations.forEach(emitSchedule);
+  try {
+    const lockUpdates = await store.releaseExpiredLocks();
+    lockUpdates.forEach(emitSchedule);
+    const reallocations = await store.runReallocation();
+    reallocations.forEach(emitSchedule);
+  } catch (error) {
+    console.warn("Background seat maintenance skipped:", error.message || error);
+  }
 }, 5_000);
 
 server.listen(PORT, () => {
