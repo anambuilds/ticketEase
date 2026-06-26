@@ -3812,3 +3812,26 @@ button > :not(.button-ripple) {
   text-align: center;
   pointer-events: none;
 }
+
+.schedule-empty {
+  min-height: 260px;
+  border: 1px dashed color-mix(in srgb, var(--muted) 28%, var(--line));
+  background: color-mix(in srgb, var(--surface) 88%, #ffffff);
+  box-shadow: none;
+}
+
+.schedule-empty .secondary {
+  width: fit-content;
+  justify-self: center;
+  margin-top: 6px;
+  padding: 12px 18px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--text);
+  font-weight: 900;
+}
+
+:root[data-theme="dark"] .schedule-empty {
+  background: color-mix(in srgb, var(--surface) 88%, #0f172a);
+}

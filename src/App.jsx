@@ -574,19 +574,33 @@ function AuthView({ onAuth, showToast }) {
 function BusSearchView({ locations, schedules, setSchedules, onSelect, showToast }) {
   const [source, setSource] = useState("");
   const [destination, setDestination] = useState("");
+  const [searching, setSearching] = useState(false);
   const visibleSchedules = pickVisibleSchedules(schedules);
 
-  async function search(event) {
-    event.preventDefault();
+  async function loadSchedules(nextSource = source, nextDestination = destination) {
+    setSearching(true);
     try {
       const params = new URLSearchParams();
-      if (source) params.set("source", source);
-      if (destination) params.set("destination", destination);
+      if (nextSource) params.set("source", nextSource);
+      if (nextDestination) params.set("destination", nextDestination);
       const data = await api(`/schedules?${params}`);
       setSchedules(data.schedules);
     } catch (error) {
       showToast(error);
+    } finally {
+      setSearching(false);
     }
+  }
+
+  async function search(event) {
+    event.preventDefault();
+    await loadSchedules();
+  }
+
+  async function clearSearch() {
+    setSource("");
+    setDestination("");
+    await loadSchedules("", "");
   }
 
   return (
@@ -594,14 +608,23 @@ function BusSearchView({ locations, schedules, setSchedules, onSelect, showToast
       <form className="search-panel" onSubmit={search} data-reveal>
         <label>Source<select value={source} onChange={(e) => setSource(e.target.value)}><option value="">Any source</option>{locations.map((item) => <option key={item}>{item}</option>)}</select></label>
         <label>Destination<select value={destination} onChange={(e) => setDestination(e.target.value)}><option value="">Any destination</option>{locations.filter((item) => item !== source).map((item) => <option key={item}>{item}</option>)}</select></label>
-        <button className="primary search-button" type="submit"><Search size={18} /> Search</button>
+        <button className="primary search-button" type="submit" disabled={searching}><Search size={18} /> {searching ? "Searching" : "Search"}</button>
       </form>
 
       <div className="section-title">
         <h2>Available schedules</h2>
       </div>
       <div className="schedule-list">
-        {visibleSchedules.map((schedule, index) => <ScheduleCard key={schedule.id} schedule={schedule} forceSoon={isDepartingSoon(schedule)} onSelect={() => onSelect(schedule.id)} />)}
+        {visibleSchedules.length > 0 ? (
+          visibleSchedules.map((schedule) => <ScheduleCard key={schedule.id} schedule={schedule} forceSoon={isDepartingSoon(schedule)} onSelect={() => onSelect(schedule.id)} />)
+        ) : (
+          <div className="empty-state schedule-empty" data-reveal>
+            <Ticket size={24} />
+            <h2>No buses found</h2>
+            <p>Try a different route or clear the search to see all available buses.</p>
+            <button className="secondary" type="button" disabled={searching} onClick={clearSearch}>Show all buses</button>
+          </div>
+        )}
       </div>
     </motion.section>
   );
@@ -1024,3 +1047,4 @@ function AdminView({ locations, showToast }) {
 function Metric({ icon, label, value }) {
   return <div className="metric-card">{icon}<span>{label}</span><strong>{value}</strong></div>;
 }
+
