@@ -101,7 +101,13 @@ async function emitNotifications(userId) {
 }
 
 app.get("/api/health", (_req, res) => {
-  res.json({ ok: true, mode: USE_POSTGRES ? "supabase-postgres" : "memory-demo" });
+  res.json({
+    ok: true,
+    mode: USE_POSTGRES ? "supabase-postgres" : "memory-demo",
+    uptimeSeconds: Math.round(process.uptime()),
+    websocketClients: io.engine.clientsCount,
+    timestamp: new Date().toISOString()
+  });
 });
 
 app.post("/api/auth/register", asyncRoute(async (req, res) => {
@@ -299,3 +305,4 @@ setInterval(async () => {
 server.listen(PORT, () => {
   console.log(`Amity BusLive API running on http://127.0.0.1:${PORT}`);
 });
+
